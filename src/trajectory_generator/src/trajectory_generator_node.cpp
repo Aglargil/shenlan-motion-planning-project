@@ -69,8 +69,10 @@ void execCallback(const ros::TimerEvent &e);
 // declare
 void changeState(STATE new_state, string pos_call);
 void printState();
-void visTrajectory(MatrixXd polyCoeff, VectorXd time);
-void visPath(MatrixXd nodes);
+void visTrajectory(MatrixXd polyCoeff, VectorXd time, const std::string &ns,
+                   const std::array<double, 4> &rgba);
+void visPath(MatrixXd nodes, const std::string &ns,
+             const std::array<double, 4> &rgba);
 bool trajOptimization(Eigen::MatrixXd path);
 void rcvOdomCallback(const nav_msgs::Odometry::ConstPtr &odom);
 void rcvWaypointsCallback(const nav_msgs::Path &wp);
@@ -238,6 +240,11 @@ bool trajGeneration() {
     ROS_INFO("grid_path size: %lu", grid_path.size());
     return false;
   }
+  MatrixXd grid_path_mat(int(grid_path.size()), 3);
+  for (int i = 0; i < int(grid_path.size()); i++) {
+    grid_path_mat.row(i) = grid_path[i];
+  }
+  visPath(grid_path_mat, "traj_node/grid_path", {1.0, 1.0, 0.0, 0.5});
   _astar_path_finder->resetUsedGrids();
 
   // Reset map for next call
@@ -260,6 +267,7 @@ bool trajGeneration() {
     for (int k = 0; k < int(simplified_path.size()); k++) {
       path.row(k) = simplified_path[k];
     }
+    visPath(path, "traj_node/simplified_path", {1.0, 0.0, 0.0, 1.0});
 
     // 尝试轨迹优化
     if (trajOptimization(path)) {
@@ -318,6 +326,9 @@ bool trajOptimization(Eigen::MatrixXd path) {
 
   // check if the trajectory is safe, if not, do reoptimize
   int unsafe_segment = -1;
+  visPath(path, "traj_node/original_path", {0.0, 0.5, 0.5, 1.0});
+  visTrajectory(_polyCoeff, _polyTime, "traj_node/optimized_trajectory",
+                {0.0, 0.5, 0.5, 1.0});
 
   /**
    *
@@ -325,6 +336,7 @@ bool trajOptimization(Eigen::MatrixXd path) {
    *
    * **/
   unsafe_segment = _astar_path_finder->safeCheck(_polyCoeff, _polyTime);
+  bool has_unsafe_segment = unsafe_segment != -1;
 
   MatrixXd repath = path;
   while (unsafe_segment != -1) {
@@ -354,8 +366,11 @@ bool trajOptimization(Eigen::MatrixXd path) {
     unsafe_segment = _astar_path_finder->safeCheck(_polyCoeff, _polyTime);
   }
   // visulize path and trajectory
-  visPath(repath);
-  visTrajectory(_polyCoeff, _polyTime);
+  if (has_unsafe_segment) {
+    visPath(path, "traj_node/reoptimized_path", {0.0, 1.0, 0.0, 1.0});
+    visTrajectory(_polyCoeff, _polyTime, "traj_node/reoptimized_trajectory",
+                  {0.0, 1.0, 0.0, 1.0});
+  }
   return true;
 }
 
@@ -434,13 +449,14 @@ VectorXd timeAllocation(MatrixXd Path) {
   return time;
 }
 
-void visTrajectory(MatrixXd polyCoeff, VectorXd time) {
+void visTrajectory(MatrixXd polyCoeff, VectorXd time, const std::string &ns,
+                   const std::array<double, 4> &rgba) {
   visualization_msgs::Marker _traj_vis;
 
   _traj_vis.header.stamp = ros::Time::now();
   _traj_vis.header.frame_id = "world";
 
-  _traj_vis.ns = "traj_node/trajectory";
+  _traj_vis.ns = ns;
   _traj_vis.id = 0;
   _traj_vis.type = visualization_msgs::Marker::SPHERE_LIST;
   _traj_vis.action = visualization_msgs::Marker::ADD;
@@ -452,10 +468,10 @@ void visTrajectory(MatrixXd polyCoeff, VectorXd time) {
   _traj_vis.pose.orientation.z = 0.0;
   _traj_vis.pose.orientation.w = 1.0;
 
-  _traj_vis.color.a = 1.0;
-  _traj_vis.color.r = 0.0;
-  _traj_vis.color.g = 0.5;
-  _traj_vis.color.b = 1.0;
+  _traj_vis.color.a = rgba[3];
+  _traj_vis.color.r = rgba[0];
+  _traj_vis.color.g = rgba[1];
+  _traj_vis.color.b = rgba[2];
 
   _traj_vis.points.clear();
   Vector3d pos;
@@ -473,7 +489,8 @@ void visTrajectory(MatrixXd polyCoeff, VectorXd time) {
   _traj_vis_pub.publish(_traj_vis);
 }
 
-void visPath(MatrixXd nodes) {
+void visPath(MatrixXd nodes, const std::string &ns,
+             const std::array<double, 4> &rgba) {
   visualization_msgs::Marker points;
 
   int id = 0;
@@ -481,7 +498,7 @@ void visPath(MatrixXd nodes) {
   points.type = visualization_msgs::Marker::SPHERE_LIST;
   points.header.frame_id = "world";
   points.header.stamp = ros::Time::now();
-  points.ns = "traj_node/path";
+  points.ns = ns;
   points.action = visualization_msgs::Marker::ADD;
   points.pose.orientation.w = 1.0;
   points.pose.orientation.x = 0.0;
@@ -490,10 +507,10 @@ void visPath(MatrixXd nodes) {
   points.scale.x = 0.2;
   points.scale.y = 0.2;
   points.scale.z = 0.2;
-  points.color.a = 1.0;
-  points.color.r = 0.0;
-  points.color.g = 0.0;
-  points.color.b = 1.0;
+  points.color.a = rgba[3];
+  points.color.r = rgba[0];
+  points.color.g = rgba[1];
+  points.color.b = rgba[2];
 
   geometry_msgs::Point p;
   for (int i = 0; i < int(nodes.rows()); i++) {
